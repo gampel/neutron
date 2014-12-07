@@ -47,7 +47,7 @@ from neutron.plugins.ml2 import driver_api as api
 from neutron import context
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
-
+import ipdb 
 
 LOG = log.getLogger(__name__)
 
@@ -548,7 +548,6 @@ class L3ReactiveApp(app_manager.RyuApp):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
         match = parser.OFPMatch()
-    # BUG in the Ryu lib constructor match do not work
         match.set_dl_type(0x0800)
         match.set_in_port(in_port)
         match.set_dl_src(haddr_to_bin(match_src_mac))
@@ -600,19 +599,21 @@ class L3ReactiveApp(app_manager.RyuApp):
             priority=priority,
             match=match)
 
-    def add_flow_normal_local_subnet(
-            self, datapath, table, priority, dst_net, dst_mask, vlan_id):
+    def add_flow_normal_local_subnet(self, datapath, table, priority,
+                                     dst_net, dst_mask, vlan_id):
+        ipdb.set_trace()
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
         #match = parser.OFPMatch(vlan_vid=0x1000| vlan_id)
-        match = parser.OFPMatch(vlan_vid=0x1000 | vlan_id)
-        match.set_dl_type(0x0800)
-        match.set_vlan_vid(0x1000 | vlan_id)
+        match = parser.OFPMatch()
+        match.set_dl_type( ether.ETH_TYPE_IP)
+        #match.set_vlan_vid(0x1000 | vlan_id)
+        match.set_metadata(vlan_id)
         match.set_ipv4_dst_masked(ipv4_text_to_int(str(dst_net)),
                                   mask_ntob(int(dst_mask)))
         #match = parser.OFPMatch(vlan_pcp=0)
         actions = [
-            parser.OFPActionPopVlan(),
+            #parser.OFPActionPopVlan(),
             parser.OFPActionOutput(
                 ofproto.OFPP_NORMAL)]
         # actions = [parser.OFPActionOutput(ofproto.OFPP_NORMAL,
@@ -643,8 +644,26 @@ class L3ReactiveApp(app_manager.RyuApp):
             priority=priority,
             match=match)
 
-    def add_flow_push_vlan_by_port_num(
-            self, datapath, table, priority, in_port, dst_vlan, goto_table):
+    def add_flow_metadata_by_port_num(self, datapath, table, priority,
+                                      in_port, metadata,
+                                      metadata_mask, goto_table):
+        parser = datapath.ofproto_parser
+        ofproto = datapath.ofproto
+        match = parser.OFPMatch()
+        match.set_in_port(in_port)
+        goto_inst = parser.OFPInstructionGotoTable(goto_table)
+        ofproto = datapath.ofproto
+        write_metadata = parser.OFPInstructionWriteMetadata(metadata,metadata_mask)
+        inst = [write_metadata, goto_inst]
+        self.mod_flow(
+            datapath,
+            inst=inst,
+            table_id=table,
+            priority=priority,
+            match=match)
+
+    def add_flow_push_vlan_by_port_num(self, datapath, table, priority,
+                                      in_port, dst_vlan, goto_table):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
         match = parser.OFPMatch()
@@ -962,16 +981,26 @@ class L3ReactiveApp(app_manager.RyuApp):
                 # data with the port num and the switch dpid
                 (port_id, mac, segmentation_id) = self.update_local_port_num(
                     port.name, port.port_no, datapath.id)
+                self.add_flow_metadata_by_port_num(datapath,
+                                                   0,
+                                                   HIGH_PRIOREITY_FLOW,
+                                                   port.port_no,
+                                                   segmentation_id,
+                                                   0xffff,
+                                                   self.CLASSIFIER_TABLE)
+
                 vlan_id = self.get_l_vid_from_seg_id(switch, segmentation_id)
                 LOG.debug(("Found VM  port  %s using MAC  %s  %d"),
                           port.name, port.hw_addr, datapath.id)
                 if vlan_id:
-                    self.add_flow_push_vlan_by_port_num(datapath,
+                    '''self.add_flow_push_vlan_by_port_num(datapath,
                                                         0,
                                                         HIGH_PRIOREITY_FLOW,
                                                         port.port_no,
                                                         vlan_id,
                                                         self.CLASSIFIER_TABLE)
+                    '''
+
                 else:
                     LOG.error(("No local switch vlan mapping for port"
                               " %s on %d Sending to Normal PATH "),
