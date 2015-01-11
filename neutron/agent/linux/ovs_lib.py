@@ -138,6 +138,7 @@ class BaseOVS(object):
 
 
 class OVSBridge(BaseOVS):
+
     def __init__(self, br_name, root_helper):
         super(OVSBridge, self).__init__(root_helper)
         self.br_name = br_name
@@ -157,6 +158,11 @@ class OVSBridge(BaseOVS):
         if res:
             return res.strip().split('\n')
         return res
+
+    def set_controller_mode(self, mode):
+        self.run_vsctl(['--', 'set', 'controller', self.br_name,
+                        "connection-mode=%s" % mode],
+                       check_error=True)
 
     def set_secure_mode(self):
         self.run_vsctl(['--', 'set-fail-mode', self.br_name, 'secure'],
@@ -209,8 +215,11 @@ class OVSBridge(BaseOVS):
         args = ["clear", table_name, record, column]
         self.run_vsctl(args)
 
-    def run_ofctl(self, cmd, args, process_input=None):
-        full_args = ["ovs-ofctl", cmd, self.br_name] + args
+    def run_ofctl(self, cmd, args, process_input=None, protocols=None):
+        if protocols:
+            full_args = ["ovs-ofctl", cmd, protocols, self.br_name] + args
+        else:
+            full_args = ["ovs-ofctl", cmd, self.br_name] + args
         try:
             return utils.execute(full_args, root_helper=self.root_helper,
                                  process_input=process_input)
@@ -245,12 +254,13 @@ class OVSBridge(BaseOVS):
         return self.db_get_val('Bridge',
                                self.br_name, 'datapath_id').strip('"')
 
-    def do_action_flows(self, action, kwargs_list):
+    def do_action_flows(self, action, kwargs_list, protocols=None):
         flow_strs = [_build_flow_expr_str(kw, action) for kw in kwargs_list]
-        self.run_ofctl('%s-flows' % action, ['-'], '\n'.join(flow_strs))
+        self.run_ofctl('%s-flows' % action, ['-'], '\n'.join(flow_strs),
+                       protocols)
 
-    def add_flow(self, **kwargs):
-        self.do_action_flows('add', [kwargs])
+    def add_flow(self, protocols=None, **kwargs):
+        self.do_action_flows('add', [kwargs], protocols)
 
     def mod_flow(self, **kwargs):
         self.do_action_flows('mod', [kwargs])

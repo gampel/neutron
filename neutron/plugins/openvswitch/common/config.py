@@ -79,6 +79,9 @@ agent_opts = [
                        "outgoing IP packet carrying GRE/VXLAN tunnel.")),
     cfg.BoolOpt('enable_distributed_routing', default=False,
                 help=_("Make the l2 agent run in DVR mode.")),
+    cfg.BoolOpt('enable_l3_controller', default=False,
+                help=_("Allow the l3 controller Mode on the"
+                       "integration_bridge")),
 ]
 
 

@@ -147,6 +147,7 @@ class TunnelTest(base.BaseTestCase):
         self.mock_int_bridge_expected = [
             mock.call.create(),
             mock.call.set_secure_mode(),
+            mock.call.del_controller(),
             mock.call.delete_port('patch-tun'),
             mock.call.remove_all_flows(),
             mock.call.add_flow(priority=1, actions='normal'),
@@ -571,6 +572,7 @@ class TunnelTestUseVethInterco(TunnelTest):
         self.mock_int_bridge_expected = [
             mock.call.create(),
             mock.call.set_secure_mode(),
+            mock.call.del_controller(),
             mock.call.delete_port('patch-tun'),
             mock.call.remove_all_flows(),
             mock.call.add_flow(priority=1, actions='normal'),

@@ -52,7 +52,10 @@ FLOOD_TO_TUN = 22
 # Tables for integration bridge
 # Table 0 is used for forwarding.
 CANARY_TABLE = 23
-
+BR_INT_CLASSIFIER_TABLE = 40
+BR_INT_METADATA_TABLE = 50
+BR_INT_ARP_TABLE = 51
+BR_INT_L3_FLOWS = 52
 # Map tunnel types to tables number
 TUN_TABLE = {p_const.TYPE_GRE: GRE_TUN_TO_LV,
              p_const.TYPE_VXLAN: VXLAN_TUN_TO_LV}

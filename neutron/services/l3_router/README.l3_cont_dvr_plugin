@@ -1,0 +1,63 @@
+#######
+In order to enable Neutron Controlle-based DVR, you need to make the 
+   following change in ``neutron.conf``:
+
+  1. Comment-out loading of the ``L3RouterPlugin``
+
+  2. Add the ``neutron.services.l3_router.l3_cont_dvr_plugin.ControllerL3ServicePlugin`` 
+     to the service plugin list: 
+
+    **neutron.conf**
+
+    :literal:`[default]`
+
+    :literal:`#service_plugins = neutron.services.l3_router.l3_router_plugin.L3RouterPlugin`
+
+    :literal:`service_plugins=neutron.services.l3_router.l3_cont_dvr_plugin.ControllerL3ServicePlugin`
+
+2. In addition, make the following change in ``ml2_conf.ini``:
+
+  * Set the ``enable_l3_controller`` to ``True``: 
+
+    **ml2_conf.ini**
+
+    :literal:`[agent]`
+
+    :literal:`# enable_l3_controller = True`
+
+    
+3. Deploy the **L3 Controller-based DVR Agent** on the Network Node
+
+4. Deploy the **Public Network Agent** on *each* Compute node
+
+5. Remove deployment of L3 Agent or DVR Agent  
+
+6. Install Ryu on Network Node
+% git clone git://github.com/osrg/ryu.git 
+The current implementation is embedded into the service plugin. will be moved into a Agent based implementation of the controller.
+Until we do that we will have to apply the following patch on ryu 
+ryu/controller/controller.py and ryu/app/wsgi.py modify register_cli_opts to register_opts
+--- a/ryu/app/wsgi.py
++++ b/ryu/app/wsgi.py
+@@ -31,7 +31,7 @@ from tinyrpc.transports import ServerTransport, ClientTranspor
+ from tinyrpc.client import RPCClient
+
+ CONF = cfg.CONF
+-CONF.register_cli_opts([
++CONF.register_opts([
+     cfg.StrOpt('wsapi-host', default='', help='webapp listen host'),
+     cfg.IntOpt('wsapi-port', default=8080, help='webapp listen port')
+ ])
+diff --git a/ryu/controller/controller.py b/ryu/controller/controller.py
+index 23418f5..a5bcda2 100644
+--- a/ryu/controller/controller.py
++++ b/ryu/controller/controller.py
+@@ -48,7 +48,7 @@ from ryu.lib.dpid import dpid_to_str
+ LOG = logging.getLogger('ryu.controller.controller')
+
+ CONF = cfg.CONF
+-CONF.register_cli_opts([
++CONF.register_opts([
+
+
+% cd ryu; python ./setup.py install  

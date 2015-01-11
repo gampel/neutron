@@ -14,12 +14,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import eventlet
 import hashlib
 import signal
 import sys
+import threading
 import time
-
-import eventlet
 eventlet.monkey_patch()
 
 import netaddr
@@ -47,8 +47,6 @@ from neutron.openstack.common import log as logging
 from neutron.openstack.common import loopingcall
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.openvswitch.common import constants
-
-
 LOG = logging.getLogger(__name__)
 cfg.CONF.import_group('AGENT', 'neutron.plugins.openvswitch.common.config')
 
@@ -194,15 +192,25 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
         # Keep track of int_br's device count for use by _report_state()
         self.int_br_device_count = 0
+        self.local_vlan_map = {}
+        # Initialize controller Ip List
+        self.controllers_ip_list = None
+        '''
+        Sync lock for Race condition set_controller <--> check_ovs_restart
+        when setting the controller all the flow table are deleted
+        by the time we set the CANARY_TABLE again.
+        '''
+        self.set_controller_lock = threading.Lock()
+        self.enable_l3_controller = cfg.CONF.AGENT.enable_l3_controller
 
         self.int_br = ovs_lib.OVSBridge(integ_br, self.root_helper)
+
         self.setup_integration_br()
         # Stores port update notifications for processing in main rpc loop
         self.updated_ports = set()
         self.setup_rpc()
         self.bridge_mappings = bridge_mappings
         self.setup_physical_bridges(self.bridge_mappings)
-        self.local_vlan_map = {}
         self.tun_br_ofports = {p_const.TYPE_GRE: {},
                                p_const.TYPE_VXLAN: {}}
 
@@ -453,6 +461,103 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         else:
             LOG.warning(_LW('Action %s not supported'), action)
 
+    def get_bridge_by_name(self, br_id):
+        bridge = None
+        if self.int_br.br_name == br_id:
+            bridge = self.int_br
+        elif self.tun_br.br_name == br_id:
+            bridge = self.tun_br
+        else:
+            for physical_network in self.phys_brs:
+                if self.phys_brs[physical_network].br_name == br_id:
+                    bridge = self.phys_brs[physical_network]
+                    break
+        return bridge
+
+    def setup_entry_for_arp_reply_remote(self, context, br_id, action,
+                                         table_id, segmentation_id, net_uuid,
+                                         mac_address, ip_address):
+        '''Set the ARP respond entry.
+        :param br_id: the bridge id.
+        :param action: add or remove.
+        :param table_id: Id of the table to insert the ARP responder rule.
+        :param segmentation_id: the segmentation id of the req network.
+        :param net_uuid: the uuid of the network associated with this vlan.
+        :param mac_address: the resolved mac addressby arp.
+        :param ip address: the ip address to resolve ARP for .
+         '''
+        br = self.get_bridge_by_name(br_id)
+        if not br:
+            LOG.errror("Failure Could not find bridge name <%s>", br_id)
+            return
+        lvm = self.local_vlan_map.get(net_uuid)
+        if lvm:
+            local_vid = lvm.vlan
+        else:
+            LOG.debug(("Network %s not used on agent."), net_uuid)
+            return
+        mac = netaddr.EUI(mac_address, dialect=netaddr.mac_unix)
+        ip = netaddr.IPAddress(ip_address)
+        if action == 'add':
+            actions = constants.ARP_RESPONDER_ACTIONS % {'mac': mac, 'ip': ip}
+            actions = "strip_vlan,%s" % actions
+            br.add_flow(table=table_id,
+                        priority=100,
+                        proto='arp',
+                        dl_vlan=local_vid,
+                        nw_dst='%s' % ip,
+                        actions=actions)
+        elif action == 'remove':
+            br.delete_flows(table=table_id,
+                            proto='arp',
+                            dl_vlan=local_vid,
+                            nw_dst='%s' % ip)
+        else:
+            LOG.warning(_LW('Action %s not supported'), action)
+
+    def set_controller_for_br(self, context, br_id, ip_address_list,
+                              force_reconnect=False, protocols="OpenFlow13"):
+        '''Set OpenFlow Controller on the Bridge .
+        :param br_id: the bridge id  .
+        :param ip_address_list: tcp:ip_address:port;tcp:ip_address2:port
+        :param force_reconnect: Force re setting the controller,remove i
+        all flows
+        '''
+        if not self.enable_l3_controller:
+            LOG.info(_LI("Controller Base l3 is disabled on Agent"))
+            return
+        bridge = None
+        if (force_reconnect or not self.controllers_ip_list
+                or self.controllers_ip_list != ip_address_list):
+            self.controllers_ip_list = ip_address_list
+            bridge = self.get_bridge_by_name(br_id)
+            if not bridge:
+                LOG.errror("set_controller_for_br failur! no bridge  %s ",
+                           br_id)
+                return
+            ip_address_ = ip_address_list.split(";")
+            LOG.debug(("Set Controllers on br %s to %s"), br_id, ip_address_)
+            self.set_controller_lock.acquire()
+            bridge.del_controller()
+            bridge.set_controller(ip_address_)
+            #bridge.set_protocols(protocols)
+            if bridge.br_name == "br-int":
+                bridge.add_flow(priority=0, actions="normal")
+                bridge.add_flow(table=constants.CANARY_TABLE, priority=0,
+                                actions="drop")
+            self.update_metadata_vlan_map_table(bridge)
+            bridge.set_controller_mode("out-of-band")
+            self.set_controller_lock.release()
+
+    def update_metadata_vlan_map_table(self, bridge):
+        for net_id, vlan_mapping in self.local_vlan_map.iteritems():
+            seg_id_hex = hex(vlan_mapping.segmentation_id)
+            bridge.add_flow(table=constants.BR_INT_METADATA_TABLE,
+                            priority=100,
+                            dl_vlan=vlan_mapping.vlan,
+                            actions="write_metadata:%s" %
+                            (seg_id_hex), protocols="-OOpenFlow13")
+
     def provision_local_vlan(self, net_uuid, network_type, physical_network,
                              segmentation_id):
         '''Provisions a local VLAN.
@@ -648,7 +753,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.dvr_agent.bind_port_to_dvr(port, network_type, fixed_ips,
                                         device_owner,
                                         local_vlan_id=lvm.vlan)
-
+        if self.enable_l3_controller:
+            self.update_metadata_vlan_map_table(self.int_br)
         # Do not bind a port if it's already bound
         cur_tag = self.int_br.db_get_val("Port", port.port_name, "tag")
         if cur_tag != str(lvm.vlan):
@@ -712,7 +818,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # which does nothing if bridge already exists.
         self.int_br.create()
         self.int_br.set_secure_mode()
-
+        if not self.enable_l3_controller:
+            self.int_br.del_controller()
         self.int_br.delete_port(cfg.CONF.OVS.int_peer_patch_port)
         self.int_br.remove_all_flows()
         # switch all traffic using L2 learning
@@ -1341,8 +1448,11 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 port_info.get('updated'))
 
     def check_ovs_status(self):
+        # Sync lock for race condition with set_controller
+        self.set_controller_lock.acquire()
         # Check for the canary flow
         canary_flow = self.int_br.dump_flows_for_table(constants.CANARY_TABLE)
+        self.set_controller_lock.release()
         if canary_flow == '':
             LOG.warn(_LW("OVS is restarted. OVSNeutronAgent will reset "
                          "bridges and recover ports."))
@@ -1467,6 +1577,12 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                             len(port_info.get('updated', [])))
                         port_stats['regular']['removed'] = (
                             len(port_info.get('removed', [])))
+                        if self.enable_l3_controller:
+                            rpc = self.plugin_rpc
+                            rpc.update_agent_port_mapping_done(self.context,
+                                                               self.agent_id,
+                                                               self.local_ip,
+                                                               cfg.CONF.host)
                     ports = port_info['current']
                     # Treat ancillary devices if they exist
                     if self.ancillary_brs:

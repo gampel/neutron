@@ -28,11 +28,11 @@ from neutron import manager
 from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants as plugin_constants
 
-
 LOG = logging.getLogger(__name__)
 
 
 class L3RpcCallback(object):
+
     """L3 agent RPC callback in plugin implementations."""
 
     # 1.0  L3PluginApi BASE_RPC_API_VERSION
@@ -80,7 +80,7 @@ class L3RpcCallback(object):
         else:
             routers = self.l3plugin.get_sync_data(context, router_ids)
         if utils.is_extension_supported(
-            self.plugin, constants.PORT_BINDING_EXT_ALIAS):
+                self.plugin, constants.PORT_BINDING_EXT_ALIAS):
             self._ensure_host_set_on_ports(context, host, routers)
         LOG.debug("Routers returned to l3 agent:\n %s",
                   jsonutils.dumps(routers, indent=5))
@@ -206,7 +206,7 @@ class L3RpcCallback(object):
         self._ensure_host_set_on_port(admin_ctx, host, agent_port)
         LOG.debug('Agent Gateway port returned : %(agent_port)s with '
                   'host %(host)s', {'agent_port': agent_port,
-                  'host': host})
+                                    'host': host})
         return agent_port
 
     def get_snat_router_interface_ports(self, context, **kwargs):
@@ -228,7 +228,7 @@ class L3RpcCallback(object):
             self._ensure_host_set_on_port(admin_ctx, host, p)
         LOG.debug('SNAT interface ports returned : %(snat_port_list)s '
                   'and on host %(host)s', {'snat_port_list': snat_port_list,
-                  'host': host})
+                                           'host': host})
         return snat_port_list
 
     def update_router_state(self, context, **kwargs):
@@ -238,3 +238,13 @@ class L3RpcCallback(object):
 
         return self.l3plugin.update_router_state(context, router_id, state,
                                                  host=host)
+
+    def update_agent_port_mapping_done(self, context, **kwargs):
+        agent_id = kwargs.get('agent_id')
+        ip_address = kwargs.get('ip_address')
+        host = kwargs.get('host')
+        try:
+            return self.l3plugin.update_agent_port_mapping_done(
+                context, agent_id, ip_address, host)
+        except AttributeError:
+            LOG.debug("No Handle for:update_agent_port_mapping_done L3 Serv")

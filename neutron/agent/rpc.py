@@ -22,7 +22,6 @@ from neutron.common import topics
 from neutron.i18n import _LW
 from neutron.openstack.common import log as logging
 
-
 LOG = logging.getLogger(__name__)
 
 
@@ -121,3 +120,13 @@ class PluginApi(object):
         cctxt = self.client.prepare()
         return cctxt.call(context, 'tunnel_sync', tunnel_ip=tunnel_ip,
                           tunnel_type=tunnel_type)
+
+    def update_agent_port_mapping_done(self, context, agent_id,
+                                       ip_address, host=None):
+        LOG.debug(("Notify controller on new/updated endpoint %s"), host)
+        topic = topics.L3PLUGIN
+        cctxt = self.client.prepare(topic=topic, fanout=True)
+        cctxt.cast(context, 'update_agent_port_mapping_done',
+                   agent_id=agent_id,
+                   ip_address=ip_address,
+                   host=host)
