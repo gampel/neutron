@@ -1,11 +1,11 @@
 #######
-In order to enable Neutron Controlle-based DVR, you need to make the 
+In order to enable Neutron Controlle-based DVR, you need to make the
    following change in ``neutron.conf``:
 
   1. Comment-out loading of the ``L3RouterPlugin``
 
-  2. Add the ``neutron.services.l3_router.l3_cont_dvr_plugin.ControllerL3ServicePlugin`` 
-     to the service plugin list: 
+  2. Add the ``neutron.services.l3_router.l3_cont_dvr_plugin.ControllerL3ServicePlugin``
+     to the service plugin list:
 
     **neutron.conf**
 
@@ -17,7 +17,7 @@ In order to enable Neutron Controlle-based DVR, you need to make the
 
 2. In addition, make the following change in ``ml2_conf.ini``:
 
-  * Set the ``enable_l3_controller`` to ``True``: 
+  * Set the ``enable_l3_controller`` to ``True``:
 
     **ml2_conf.ini**
 
@@ -25,17 +25,16 @@ In order to enable Neutron Controlle-based DVR, you need to make the
 
     :literal:`# enable_l3_controller = True`
 
-    
 3. Deploy the **L3 Controller-based DVR Agent** on the Network Node
 
 4. Deploy the **Public Network Agent** on *each* Compute node
 
-5. Remove deployment of L3 Agent or DVR Agent  
+5. Remove deployment of L3 Agent or DVR Agent
 
 6. Install Ryu on Network Node
-% git clone git://github.com/osrg/ryu.git 
+% git clone git://github.com/osrg/ryu.git
 The current implementation is embedded into the service plugin. will be moved into a Agent based implementation of the controller.
-Until we do that we will have to apply the following patch on ryu 
+Until we do that we will have to apply the following patch on ryu
 ryu/controller/controller.py and ryu/app/wsgi.py modify register_cli_opts to register_opts
 --- a/ryu/app/wsgi.py
 +++ b/ryu/app/wsgi.py
@@ -60,4 +59,51 @@ index 23418f5..a5bcda2 100644
 +CONF.register_opts([
 
 
-% cd ryu; python ./setup.py install  
+% cd ryu; python ./setup.py install
+
+For Tenant with two networks:
+192.168.100.0/24
+VM1 :192.168.100.2
+VM3: 192.168.100.4
+
+
+192.168.200.0/24
+VM2:192.168.200.2
+
+
+On devstack one machine setup you will get  following  flows after boot strap
+running the following command
+
+sudo ovs-ofctl dump-flows br-int
+
+NXST_FLOW reply (xid=0x4):
+ cookie=0x0, duration=9.970s, table=0, n_packets=0, n_bytes=0, idle_age=9, priority=1 actions=drop
+ cookie=0x0, duration=9.970s, table=0, n_packets=0, n_bytes=0, idle_age=9, priority=1000,in_port=10 actions=NORMAL
+ cookie=0x0, duration=9.970s, table=0, n_packets=0, n_bytes=0, idle_age=9, priority=1000,in_port=35 actions=NORMAL
+ cookie=0x0, duration=9.970s, table=0, n_packets=1, n_bytes=107, idle_age=4, priority=1000,in_port=30 actions=write_metadata:0xfa2/0xffff
+ cookie=0x0, duration=9.970s, table=0, n_packets=1, n_bytes=107, idle_age=7, priority=1000,in_port=6 actions=write_metadata:0xfa2/0xffff
+ cookie=0x0, duration=9.970s, table=0, n_packets=0, n_bytes=0, idle_age=9, priority=1000,in_port=1 actions=NORMAL
+ cookie=0x0, duration=9.970s, table=0, n_packets=0, n_bytes=0, idle_age=9, priority=1000,in_port=5 actions=NORMAL
+ cookie=0x0, duration=9.970s, table=0, n_packets=22, n_bytes=3974, idle_age=0, priority=1000,in_port=11 actions=write_metadata:0xfa3/0xffff
+ cookie=0x0, duration=10.804s, table=23, n_packets=0, n_bytes=0, idle_age=10, priority=0 actions=drop
+ cookie=0x0, duration=9.970s, table=40, n_packets=0, n_bytes=0, idle_age=9, priority=1 actions=drop
+ cookie=0x0, duration=9.977s, table=40, n_packets=24, n_bytes=4188, idle_age=0, priority=10,dl_dst=01:00:00:00:00:00/01:00:00:00:00:00 actions=drop
+ cookie=0x0, duration=9.977s, table=40, n_packets=0, n_bytes=0, idle_age=9, priority=100,dl_dst=ff:ff:ff:ff:ff:ff actions=drop
+ cookie=0x0, duration=9.977s, table=40, n_packets=0, n_bytes=0, idle_age=9, priority=10,arp actions=drop
+ cookie=0x0, duration=9.977s, table=51, n_packets=24, n_bytes=4188, idle_age=0, priority=1 actions=NORMAL
+ cookie=0x0, duration=9.817s, table=51, n_packets=0, n_bytes=0, idle_age=9, priority=100,arp,metadata=0xfa3,arp_tpa=192.168.200.1 actions=strip_vlan,move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:fa:16:3e:e9:74:9c,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0xfa163ee9749c->NXM_NX_ARP_SHA[],load:0xc0a8c801->NXM_OF_ARP_SPA[],IN_PORT
+ cookie=0x0, duration=9.812s, table=51, n_packets=0, n_bytes=0, idle_age=9, priority=100,arp,metadata=0xfa2,arp_tpa=192.168.100.1 actions=strip_vlan,move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:fa:16:3e:6f:f6:6e,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0xfa163e6ff66e->NXM_NX_ARP_SHA[],load:0xc0a86401->NXM_OF_ARP_SPA[],IN_PORT
+ cookie=0x0, duration=9.966s, table=52, n_packets=0, n_bytes=0, idle_age=9, priority=99,metadata=0xfa2,dl_dst=fa:16:3e:6f:f6:6e actions=CONTROLLER:65535
+ cookie=0x0, duration=9.970s, table=52, n_packets=0, n_bytes=0, idle_age=9, priority=99,metadata=0xfa3,dl_dst=fa:16:3e:e9:74:9c actions=CONTROLLER:65535
+ cookie=0x0, duration=9.970s, table=52, n_packets=0, n_bytes=0, idle_age=9, priority=0 actions=CONTROLLER:65535
+ cookie=0x0, duration=9.967s, table=52, n_packets=0, n_bytes=0, idle_age=9, priority=10,ip,metadata=0xfa2,nw_dst=192.168.100.0/24 actions=NORMAL
+ cookie=0x0, duration=9.970s, table=52, n_packets=0, n_bytes=0, idle_age=9, priority=10,ip,metadata=0xfa3,nw_dst=192.168.200.0/24 actions=NORMAL
+
+
+
+After   ping from VM1 to VM3 you will get the following additional  flows on table 52
+
+ sudo ovs-ofctl dump-flows br-int
+
+ cookie=0x0, duration=3.606s, table=52, n_packets=0, n_bytes=0, idle_age=3, priority=100,ip,metadata=0xfa2,in_port=6,dl_src=fa:16:3e:59:a5:7e,dl_dst=fa:16:3e:6f:f6:6e,nw_src=192.168.100.2,nw_dst=192.168.200.2 actions=dec_ttl(0),mod_dl_src:fa:16:3e:e9:74:9c,mod_dl_dst:fa:16:3e:6b:e4:97,output:11
+  cookie=0x0, duration=3.606s, table=52, n_packets=1, n_bytes=98, idle_age=3, priority=100,ip,metadata=0xfa3,in_port=11,dl_src=fa:16:3e:6b:e4:97,dl_dst=fa:16:3e:e9:74:9c,nw_src=192.168.200.2,nw_dst=192.168.100.2 actions=dec_ttl(0),mod_dl_src:fa:16:3e:6f:f6:6e,mod_dl_dst:fa:16:3e:59:a5:7e,output:6

@@ -27,6 +27,7 @@ from ryu.controller.handler import set_ev_cls
 from ryu.controller import ofp_event
 from ryu.ofproto import ether
 from ryu.ofproto.ether import ETH_TYPE_8021Q
+from ryu.ofproto import nx_match
 from ryu.ofproto import ofproto_v1_3
 
 from ryu.lib.packet import ethernet
@@ -192,8 +193,9 @@ class L3ReactiveApp(app_manager.RyuApp):
         for dpid in self.dp_list:
             datapath = self.dp_list[dpid].datapath
             self.send_features_request(datapath)
-            self.send_flow_stats_request(
-                datapath, table=self.METADATA_TABLE_ID)
+            self.send_port_desc_stats_request(datapath)
+            #self.send_flow_stats_request(
+             #   datapath, table=self.METADATA_TABLE_ID)
 
     def sync_data(self):
         self.logger.info(" l3_reactive_app sync router data ")
@@ -349,129 +351,120 @@ class L3ReactiveApp(app_manager.RyuApp):
                               eth):
         pkt_ipv4 = header_list['ipv4']
         pkt_ethernet = header_list['ethernet']
+        #ipdb.set_trace()
+        switch = self.dp_list.get(datapath.id)
+        if switch:
+            if 'metadata' not in msg.match:
+                # send request for loacl switch data
+                # self.send_port_desc_stats_request(datapath)
+                #self.send_flow_stats_request(
+                #    datapath, table=self.METADATA_TABLE_ID)
+                LOG.error(("No metadata on packet from %s"),
+                          eth.src)
+                return
+            segmentation_id = msg.match['metadata']
+            self.logger.info(
+                "packet segmentation_id %s ",
+                segmentation_id)
+            for tenantid in self.tenants:
+                tenant = self.tenants[tenantid]
+                for router in tenant.routers:
+                    for subnet in router.subnets:
+                        if segmentation_id == subnet.segmentation_id:
+                            self.logger.info("packet from  to tenant  %s ",
+                                             tenant.tenant_id)
+                            in_port_data = self.tenants[
+                                tenantid].mac_to_port_data[eth.src]
+                            out_port_data = self.tenants[
+                                tenantid].mac_to_port_data[eth.dst]
+                            LOG.debug(('Source port data <--- %s ',
+                                       in_port_data))
+                            LOG.debug(('Router Mac dest port data -> %s ',
+                                       out_port_data))
+                            if self.handle_router_interface(datapath,
+                                                            in_port,
+                                                            out_port_data,
+                                                            pkt,
+                                                            pkt_ethernet,
+                                                            pkt_ipv4) == 1:
+                                # trafic to the virtual routre handle only
+                                # ping
+                                return
+                            (dst_p_data,
+                             dst_sub_id) = self.get_port_data(tenant,
+                                                              pkt_ipv4.dst)
+                            for _subnet in router.subnets:
+                                if dst_sub_id == _subnet.data['id']:
+                                    out_subnet = _subnet
+                                    subnet_gw = out_subnet.data[
+                                        'gateway_ip']
 
-        # Check vlan-tag
-        if VLAN in header_list:
-            vlan_id = header_list[VLAN].vid
-            self.logger.info("handle_ipv4_packet_in::  VLANID %s  ", vlan_id)
-            switch = self.dp_list.get(datapath.id)
-            if switch:
-                if vlan_id not in switch.local_vlan_mapping:
-                    # send request for loacl switch data
-                    # self.send_port_desc_stats_request(datapath)
-                    self.send_flow_stats_request(
-                        datapath, table=self.METADATA_TABLE_ID)
-                    LOG.error(("No local switch vlan mapping for vlan %s"),
-                              vlan_id)
-                    return
-                self.logger.info(
-                    "packet segmentation_id %s ",
-                    switch.local_vlan_mapping[vlan_id])
-                segmentation_id = switch.local_vlan_mapping[vlan_id]
-                for tenantid in self.tenants:
-                    tenant = self.tenants[tenantid]
-                    for router in tenant.routers:
-                        for subnet in router.subnets:
-                            if segmentation_id == subnet.segmentation_id:
-                                self.logger.info("packet from  to tenant  %s ",
-                                                 tenant.tenant_id)
-                                in_port_data = self.tenants[
-                                    tenantid].mac_to_port_data[eth.src]
-                                out_port_data = self.tenants[
-                                    tenantid].mac_to_port_data[eth.dst]
-                                LOG.debug(('Source port data <--- %s ',
-                                           in_port_data))
-                                LOG.debug(('Router Mac dest port data -> %s ',
-                                           out_port_data))
-                                if self.handle_router_interface(datapath,
-                                                                in_port,
-                                                                out_port_data,
-                                                                pkt,
-                                                                pkt_ethernet,
-                                                                pkt_ipv4) == 1:
-                                    # trafic to the virtual routre handle only
-                                    # ping
-                                    return
-                                (dst_p_data,
-                                 dst_sub_id) = self.get_port_data(tenant,
-                                                                  pkt_ipv4.dst)
-                                for _subnet in router.subnets:
-                                    if dst_sub_id == _subnet.data['id']:
-                                        out_subnet = _subnet
-                                        subnet_gw = out_subnet.data[
-                                            'gateway_ip']
+                                    (dst_gw_port_data,
+                                     dst_gw_sub_id) = self.get_port_data(
+                                        tenant, subnet_gw)
 
-                                        (dst_gw_port_data,
-                                         dst_gw_sub_id) = self.get_port_data(
-                                            tenant, subnet_gw)
-
-                                        if self.handle_router_interface(
-                                                datapath,
-                                                in_port,
-                                                dst_gw_port_data,
-                                                pkt,
-                                                pkt_ethernet,
-                                                pkt_ipv4) == 1:
-                                            # this trafic to the virtual routre
-                                            return
-                                        if not dst_p_data:
-                                            LOG.error(("No local switch"
-                                                       "mapping for %s"),
-                                                      pkt_ipv4.dst)
-                                            return
-                                        if self.handle_router_interface(
-                                                datapath,
-                                                in_port,
-                                                dst_p_data,
-                                                pkt,
-                                                pkt_ethernet,
-                                                pkt_ipv4) != -1:
-                                            # case for vrouter that is not the
-                                            #gw and we are trying to  ping
-                                            # this trafic to the virtual routre
-                                            return
-
-                                        LOG.debug(("Route from  %s to %s"
-                                                   "exist installing flow ",
-                                                   pkt_ipv4.src,
-                                                   pkt_ipv4.dst))
-                                        dst_vlan = self.get_l_vid_from_seg_id(
-                                            switch,
-                                            out_subnet.segmentation_id)
-                                        self.install_l3_forwarding_flows(
+                                    if self.handle_router_interface(
                                             datapath,
-                                            msg,
-                                            in_port_data,
                                             in_port,
-                                            vlan_id,
-                                            eth,
-                                            pkt_ipv4,
                                             dst_gw_port_data,
+                                            pkt,
+                                            pkt_ethernet,
+                                            pkt_ipv4) == 1:
+                                        # this trafic to the virtual routre
+                                        return
+                                    if not dst_p_data:
+                                        LOG.error(("No local switch"
+                                                   "mapping for %s"),
+                                                  pkt_ipv4.dst)
+                                        return
+                                    if self.handle_router_interface(
+                                            datapath,
+                                            in_port,
                                             dst_p_data,
-                                            dst_vlan)
+                                            pkt,
+                                            pkt_ethernet,
+                                            pkt_ipv4) != -1:
+                                        # case for vrouter that is not the
+                                        #gw and we are trying to  ping
+                                        # this trafic to the virtual routre
                                         return
 
-    def install_l3_forwarding_flows(
-            self,
-            datapath,
-            msg,
-            in_port_data,
-            in_port,
-            vlan_id,
-            eth,
-            pkt_ipv4,
-            dst_gw_port_data,
-            dst_p_data,
-            dst_vlan):
+                                    LOG.debug(("Route from  %s to %s"
+                                               "exist installing flow ",
+                                               pkt_ipv4.src,
+                                               pkt_ipv4.dst))
+                                    self.install_l3_forwarding_flows(
+                                        datapath,
+                                        msg,
+                                        in_port_data,
+                                        in_port,
+                                        segmentation_id,
+                                        eth,
+                                        pkt_ipv4,
+                                        dst_gw_port_data,
+                                        dst_p_data,
+                                        out_subnet.segmentation_id)
+                                    return
+
+    def install_l3_forwarding_flows(self,
+                                    datapath,
+                                    msg,
+                                    in_port_data,
+                                    in_port,
+                                    src_seg_id,
+                                    eth,
+                                    pkt_ipv4,
+                                    dst_gw_port_data,
+                                    dst_p_data,
+                                    dst_seg_id):
         if dst_p_data['local_dpid_switch'] == datapath.id:
             # The dst VM and the source VM are on the same copute Node
             # Send output flow directly to port iuse the same datapath
-            actions = self.add_flow_subnet_traffic(
-                datapath,
+            actions = self.add_flow_subnet_traffic(datapath,
                 self.L3_VROUTER_TABLE,
                 MEDIUM_PRIOREITY_FLOW,
                 in_port,
-                vlan_id,
+                src_seg_id,
                 eth.src,
                 eth.dst,
                 pkt_ipv4.dst,
@@ -479,12 +472,12 @@ class L3ReactiveApp(app_manager.RyuApp):
                 dst_gw_port_data['mac_address'],
                 dst_p_data['mac_address'],
                 dst_p_data['local_port_num'])
-    # Install the reverse flow return traffic
+            # Install the reverse flow return traffic
             self.add_flow_subnet_traffic(datapath,
                                          self.L3_VROUTER_TABLE,
                                          MEDIUM_PRIOREITY_FLOW,
                                          dst_p_data['local_port_num'],
-                                         dst_vlan,
+                                         dst_seg_id,
                                          dst_p_data['mac_address'],
                                          dst_gw_port_data['mac_address'],
                                          pkt_ipv4.src,
@@ -503,7 +496,7 @@ class L3ReactiveApp(app_manager.RyuApp):
                                                    self.L3_VROUTER_TABLE,
                                                    MEDIUM_PRIOREITY_FLOW,
                                                    in_port,
-                                                   vlan_id,
+                                                   src_seg_id,
                                                    eth.src,
                                                    eth.dst,
                                                    pkt_ipv4.dst,
@@ -513,13 +506,13 @@ class L3ReactiveApp(app_manager.RyuApp):
                                                    dst_p_data[
                                                        'mac_address'],
                                                    localSwitch.patch_port,
-                                                   dst_vlan)
+                                                   dst_seg_id=dst_seg_id)
             # Remote reverse flow install
             self.add_flow_subnet_traffic(remoteSwitch.datapath,
                                          self.L3_VROUTER_TABLE,
                                          MEDIUM_PRIOREITY_FLOW,
                                          dst_p_data['local_port_num'],
-                                         dst_vlan,
+                                         dst_seg_id,
                                          dst_p_data['mac_address'],
                                          dst_gw_port_data['mac_address'],
                                          pkt_ipv4.src,
@@ -527,7 +520,7 @@ class L3ReactiveApp(app_manager.RyuApp):
                                          eth.dst,
                                          in_port_data['mac_address'],
                                          in_port_data['local_port_num'],
-                                         vlan_id)
+                                         dst_seg_id=src_seg_id)
             self.handle_packet_out_l3(datapath, msg, in_port, actions)
 
     def handle_packet_out_l3(self, datapath, msg, in_port, actions):
@@ -542,31 +535,28 @@ class L3ReactiveApp(app_manager.RyuApp):
         datapath.send_msg(out)
 
     def add_flow_subnet_traffic(self, datapath, table, priority, in_port,
-                                match_vlan, match_src_mac, match_dst_mac,
+                                src_seg_id, match_src_mac, match_dst_mac,
                                 match_dst_ip, match_src_ip, src_mac,
-                                dst_mac, out_port_num, dst_vlan=None):
+                                dst_mac, out_port_num, dst_seg_id=None):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
         match = parser.OFPMatch()
-        match.set_dl_type(0x0800)
+        match.set_dl_type( ether.ETH_TYPE_IP)
         match.set_in_port(in_port)
+        match.set_metadata(src_seg_id)
         match.set_dl_src(haddr_to_bin(match_src_mac))
         match.set_dl_dst(haddr_to_bin(match_dst_mac))
         match.set_ipv4_src(ipv4_text_to_int(str(match_src_ip)))
         match.set_ipv4_dst(ipv4_text_to_int(str(match_dst_ip)))
-        match.set_vlan_vid(0x1000 | match_vlan)
-        actions = [parser.OFPActionPopVlan()]
+        actions = []
+        if dst_seg_id:
+            field = parser.OFPActionSetField(tunnel_id=dst_seg_id)
+            actions.append(parser.OFPActionSetField(field))
         actions.append(parser.OFPActionDecNwTtl())
         actions.append(parser.OFPActionSetField(eth_src=src_mac))
         actions.append(parser.OFPActionSetField(eth_dst=dst_mac))
         actions.append(parser.OFPActionOutput(out_port_num,
                                               ofproto.OFPCML_NO_BUFFER))
-        if dst_vlan:
-            field = parser.OFPMatchField.make(
-                ofproto.OXM_OF_VLAN_VID, dst_vlan)
-            actions.append(parser.OFPActionPushVlan(ETH_TYPE_8021Q))
-            actions.append(parser.OFPActionSetField(field))
-
         ofproto = datapath.ofproto
         inst = [datapath.ofproto_parser.OFPInstructionActions(
             ofproto.OFPIT_APPLY_ACTIONS, actions)]
@@ -600,15 +590,14 @@ class L3ReactiveApp(app_manager.RyuApp):
             match=match)
 
     def add_flow_normal_local_subnet(self, datapath, table, priority,
-                                     dst_net, dst_mask, vlan_id):
-        ipdb.set_trace()
+                                     dst_net, dst_mask, seg_id):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
         #match = parser.OFPMatch(vlan_vid=0x1000| vlan_id)
         match = parser.OFPMatch()
         match.set_dl_type( ether.ETH_TYPE_IP)
         #match.set_vlan_vid(0x1000 | vlan_id)
-        match.set_metadata(vlan_id)
+        match.set_metadata(seg_id)
         match.set_ipv4_dst_masked(ipv4_text_to_int(str(dst_net)),
                                   mask_ntob(int(dst_mask)))
         #match = parser.OFPMatch(vlan_pcp=0)
@@ -706,13 +695,12 @@ class L3ReactiveApp(app_manager.RyuApp):
             instructions)
         datapath.send_msg(flow_mod)
 
-    def add_flow_normal(self, datapath, table, priority):
+    def add_flow_normal(self, datapath, table, priority, match=None):
         parser = datapath.ofproto_parser
         ofproto = datapath.ofproto
-        match = parser.OFPMatch(vlan_vid=0x1000)
+        #match = parser.OFPMatch(vlan_vid=0x1000)
         #match = parser.OFPMatch(vlan_pcp=0)
         actions = [
-            parser.OFPActionPopVlan(),
             parser.OFPActionOutput(
                 ofproto.OFPP_NORMAL)]
         ofproto = datapath.ofproto
@@ -831,12 +819,11 @@ class L3ReactiveApp(app_manager.RyuApp):
             match=match)
 
     def add_flow_match_gw_mac_to_cont(self, datapath, dst_mac, table,
-                                      priority, vlan_vid=None,
+                                      priority, seg_id=None,
                                       _actions=None):
         parser = datapath.ofproto_parser
         #ofproto = datapath.ofproto
-        vlan_id = 0x1000 | vlan_vid
-        match = parser.OFPMatch(eth_dst=dst_mac, vlan_vid=vlan_id)
+        match = parser.OFPMatch(eth_dst=dst_mac, metadata=seg_id)
 
         self.add_flow_match_to_controller(
             datapath, table, priority, match=match, _actions=_actions)
@@ -899,8 +886,9 @@ class L3ReactiveApp(app_manager.RyuApp):
 
         switch = self.dp_list.get(datapath.id)
         if switch:
-            self.send_flow_stats_request(
-                datapath, table=self.METADATA_TABLE_ID)
+            self.send_port_desc_stats_request(datapath)
+           # self.send_flow_stats_request(
+            #    datapath, table=self.METADATA_TABLE_ID)
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -917,7 +905,8 @@ class L3ReactiveApp(app_manager.RyuApp):
         time.sleep(1)  # sleep during 500ms
         LOG.info(("Done Wait .. will retry if meta table not set "))
 
-        self.send_flow_stats_request(datapath, table=self.METADATA_TABLE_ID)
+        self.send_port_desc_stats_request(datapath)
+        #self.send_flow_stats_request(datapath, table=self.METADATA_TABLE_ID)
         #  --> meta
         #self.add_flow_go_to_table2(datapath, 0, 1  ,self.L3_VROUTER_TABLE)
         # main table 0  to Arp On ARp or broadcat or multicast
@@ -936,10 +925,6 @@ class L3ReactiveApp(app_manager.RyuApp):
             self.CLASSIFIER_TABLE,
             NORMAL_PRIOREITY_FLOW,
             self.ARP_AND_BR_TABLE)
-
-        # Meta Table to L3 router table on all other trafic
-        self.add_flow_go_to_table2(
-            datapath, self.METADATA_TABLE_ID, 1, self.L3_VROUTER_TABLE)
 
         # Normal flow on arp table in low priorety
         self.add_flow_normal(datapath, self.ARP_AND_BR_TABLE, 1)
@@ -992,14 +977,13 @@ class L3ReactiveApp(app_manager.RyuApp):
                 vlan_id = self.get_l_vid_from_seg_id(switch, segmentation_id)
                 LOG.debug(("Found VM  port  %s using MAC  %s  %d"),
                           port.name, port.hw_addr, datapath.id)
-                if vlan_id:
-                    '''self.add_flow_push_vlan_by_port_num(datapath,
+                '''if vlan_id:
+                    self.add_flow_push_vlan_by_port_num(datapath,
                                                         0,
                                                         HIGH_PRIOREITY_FLOW,
                                                         port.port_no,
                                                         vlan_id,
                                                         self.CLASSIFIER_TABLE)
-                    '''
 
                 else:
                     LOG.error(("No local switch vlan mapping for port"
@@ -1009,6 +993,7 @@ class L3ReactiveApp(app_manager.RyuApp):
                     self.add_flow_normal_by_port_num(datapath, 0,
                                                      HIGH_PRIOREITY_FLOW,
                                                      port.port_no)
+                    '''
             elif "patch-tun" in port.name:
                 LOG.debug(("Found br-tun patch port "
                            "%s   %s sending to NORMAL path"),
@@ -1021,8 +1006,45 @@ class L3ReactiveApp(app_manager.RyuApp):
         switch.local_ports = ports
         self.add_flow_go_to_table2(datapath, 0, 1, self.CLASSIFIER_TABLE)
         self.add_flow_match_to_controller(datapath, self.L3_VROUTER_TABLE, 0)
-        self.add_flow_go_to_table2(
-            datapath, self.CLASSIFIER_TABLE, 1, self.L3_VROUTER_TABLE)
+        self.add_flow_go_to_table2(datapath, self.CLASSIFIER_TABLE, 1,
+                                   self.L3_VROUTER_TABLE)
+        l3plugin = manager.NeutronManager.get_service_plugins().get(
+            service_constants.L3_ROUTER_NAT)
+
+        for tenantid in self.tenants:
+            for router in self.tenants[tenantid].routers:
+                for subnet in router.subnets:
+                    for interface in router.data['_interfaces']:
+                        if interface['subnet']['id'] == subnet.data['id']:
+                            segmentation_id = subnet.segmentation_id
+                            #vlan_id = self.get_l_vid_from_seg_id(
+                            #    switch, segmentation_id)
+                            network, net_mask = self.get_subnet_from_cidr(
+                                subnet.data['cidr'])
+
+                            self.add_flow_normal_local_subnet(
+                                datapath,
+                                self.L3_VROUTER_TABLE,
+                                NORMAL_PRIOREITY_FLOW,
+                                network,
+                                net_mask,
+                                segmentation_id)
+
+                            self.add_flow_match_gw_mac_to_cont(
+                                datapath,
+                                interface['mac_address'],
+                                self.L3_VROUTER_TABLE,
+                                99,
+                                segmentation_id)
+                            l3plugin.setup_vrouter_arp_responder(
+                                self.ctx,
+                                "br-int",
+                                "add",
+                                self.ARP_AND_BR_TABLE,
+                                segmentation_id,
+                                interface['network_id'],
+                                interface['mac_address'],
+                                self.get_ip_from_router_interface(interface))
 
     def send_features_request(self, datapath):
         ofp_parser = datapath.ofproto_parser
@@ -1131,50 +1153,14 @@ class L3ReactiveApp(app_manager.RyuApp):
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             service_constants.L3_ROUTER_NAT)
         switch = self.dp_list.get(datapath.id)
-
-        for tenantid in self.tenants:
-            for router in self.tenants[tenantid].routers:
-                for subnet in router.subnets:
-                    for interface in router.data['_interfaces']:
-                        if interface['subnet']['id'] == subnet.data['id']:
-                            segmentation_id = subnet.segmentation_id
-                            vlan_id = self.get_l_vid_from_seg_id(
-                                switch, segmentation_id)
-                            network, net_mask = self.get_subnet_from_cidr(
-                                subnet.data['cidr'])
-
-                            if vlan_id:
-                                self.add_flow_normal_local_subnet(
-                                    datapath,
-                                    self.L3_VROUTER_TABLE,
-                                    NORMAL_PRIOREITY_FLOW,
-                                    network,
-                                    net_mask,
-                                    vlan_id)
-
-                                self.add_flow_match_gw_mac_to_cont(
-                                    datapath,
-                                    interface['mac_address'],
-                                    self.L3_VROUTER_TABLE,
-                                    99,
-                                    vlan_id)
-                            l3plugin.setup_vrouter_arp_responder(
-                                self.ctx,
-                                "br-int",
-                                "add",
-                                self.ARP_AND_BR_TABLE,
-                                segmentation_id,
-                                interface['network_id'],
-                                interface['mac_address'],
-                                self.get_ip_from_router_interface(interface))
-        # No match on table L3_VROUTER_TABLE go to normal flow
+       # No match on table L3_VROUTER_TABLE go to normal flow
         # No match on table L3_VROUTER_TABLE go to controller
         # Patch to overcome OVS BUG not accepting match on tag vlans
         # set Pop per taged vlan
 
-        for local_vlan in switch.local_vlan_mapping:
-            self.add_flow_pop_vlan_to_normal(
-                datapath, self.ARP_AND_BR_TABLE, 1, local_vlan)
+       # for local_vlan in switch.local_vlan_mapping:
+       #     self.add_flow_pop_vlan_to_normal(
+       #        datapath, self.ARP_AND_BR_TABLE, 1, local_vlan)
 
         if not switch.local_vlan_mapping:
             LOG.error(("CRITICAL ERROR ***** Switch did not send local port"

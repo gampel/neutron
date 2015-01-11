@@ -192,7 +192,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
         # Keep track of int_br's device count for use by _report_state()
         self.int_br_device_count = 0
-        self.local_vlan_map = {}
         # Initialize controller Ip List
         self.controllers_ip_list = None
         '''
@@ -211,6 +210,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.setup_rpc()
         self.bridge_mappings = bridge_mappings
         self.setup_physical_bridges(self.bridge_mappings)
+        self.local_vlan_map = {}
         self.tun_br_ofports = {p_const.TYPE_GRE: {},
                                p_const.TYPE_VXLAN: {}}
 
@@ -305,6 +305,10 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         if self.l2_pop:
             consumers.append([topics.L2POPULATION,
                               topics.UPDATE, cfg.CONF.host])
+        if self.enable_l3_controller:
+            consumers.append([topics.SDNCONTROLLER,
+                              topics.UPDATE])
+
         self.connection = agent_rpc.create_consumers(self.endpoints,
                                                      self.topic,
                                                      consumers,
@@ -504,7 +508,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             br.add_flow(table=table_id,
                         priority=100,
                         proto='arp',
-                        dl_vlan=local_vid,
+                        metadata=segmentation_id,
                         nw_dst='%s' % ip,
                         actions=actions)
         elif action == 'remove':
@@ -545,18 +549,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 bridge.add_flow(priority=0, actions="normal")
                 bridge.add_flow(table=constants.CANARY_TABLE, priority=0,
                                 actions="drop")
-            self.update_metadata_vlan_map_table(bridge)
             bridge.set_controller_mode("out-of-band")
             self.set_controller_lock.release()
-
-    def update_metadata_vlan_map_table(self, bridge):
-        for net_id, vlan_mapping in self.local_vlan_map.iteritems():
-            seg_id_hex = hex(vlan_mapping.segmentation_id)
-            bridge.add_flow(table=constants.BR_INT_METADATA_TABLE,
-                            priority=100,
-                            dl_vlan=vlan_mapping.vlan,
-                            actions="write_metadata:%s" %
-                            (seg_id_hex), protocols="-OOpenFlow13")
 
     def provision_local_vlan(self, net_uuid, network_type, physical_network,
                              segmentation_id):
@@ -753,8 +747,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.dvr_agent.bind_port_to_dvr(port, network_type, fixed_ips,
                                         device_owner,
                                         local_vlan_id=lvm.vlan)
-        if self.enable_l3_controller:
-            self.update_metadata_vlan_map_table(self.int_br)
         # Do not bind a port if it's already bound
         cur_tag = self.int_br.db_get_val("Port", port.port_name, "tag")
         if cur_tag != str(lvm.vlan):
@@ -1447,7 +1439,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 port_info.get('removed') or
                 port_info.get('updated'))
 
-    def check_ovs_status(self):
+    def check_ovs_restart(self):
+        # Check for the canary flow
         # Sync lock for race condition with set_controller
         self.set_controller_lock.acquire()
         # Check for the canary flow

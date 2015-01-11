@@ -19,7 +19,7 @@ PORT = 'port'
 SECURITY_GROUP = 'security_group'
 L2POPULATION = 'l2population'
 DVR = 'dvr'
-
+SDNCONTROLLER='sdncontrol'
 CREATE = 'create'
 DELETE = 'delete'
 UPDATE = 'update'

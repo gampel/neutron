@@ -222,9 +222,9 @@ class ControllerL3ServicePlugin(common_db_mixin.CommonDbMixin,
                   agent_id,
                   ip_address,
                   host)
-        self.send_set_controllers_upadte(_context, False)
+        self.send_set_controllers_update(_context, False)
 
-    def send_set_controllers_upadte(self, _context, force_reconnect):
+    def send_set_controllers_update(self, _context, force_reconnect):
 
         topic_port_update = topics.get_topic_name(topics.AGENT,
                                                   topics.PORT,
@@ -289,7 +289,7 @@ class ControllerRunner(threading.Thread):
         if self.sync_all:
             l3plugin = manager.NeutronManager.get_service_plugins().get(
                 constants.L3_ROUTER_NAT)
-            l3plugin.send_set_controllers_upadte(self.ctx, True)
+            l3plugin.send_set_controllers_update(self.ctx, True)
             self.sync_all = False
         plugin = manager.NeutronManager.get_plugin()
         plugin.create_or_update_agent(self.ctx, self.agent_state)
