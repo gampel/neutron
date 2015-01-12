@@ -48,7 +48,6 @@ from neutron.plugins.ml2 import driver_api as api
 from neutron import context
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
-import ipdb 
 
 LOG = log.getLogger(__name__)
 
@@ -181,6 +180,7 @@ class L3ReactiveApp(app_manager.RyuApp):
         self.dp_list = {}
 
     def start(self):
+        self.logger.info("Starting Virtual L3 Reactive OpenFlow APP ")
         super(L3ReactiveApp, self).start()
         return 1
 
@@ -893,7 +893,6 @@ class L3ReactiveApp(app_manager.RyuApp):
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
-
         if self.need_sync:
             self.sync_data()
         switch = self.dp_list.get(datapath.id)

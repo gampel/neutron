@@ -49,7 +49,7 @@ LOG = logging.getLogger(__name__)
 
 NET_CONTROL_L3_OPTS = [
     cfg.StrOpt('L3controller_ip_list',
-               default='tcp:10.100.100.38:6633',
+               default='tcp:10.100.100.3:6633',
                help=("L3 Controler IP list list tcp:ip_addr:port;"
                      "tcp:ip_addr:port..;..")),
     cfg.StrOpt('net_controller_l3_southbound_protocol',
@@ -79,7 +79,7 @@ class ControllerL3ServicePlugin(common_db_mixin.CommonDbMixin,
         self.start_periodic_agent_status_check()
         if cfg.CONF.net_controller_l3_southbound_protocol == "OpenFlow":
             # Open Flow Controller
-            LOG.debug(("Using Southbound OpenFlow Protocol "))
+            LOG.info(("Using Southbound OpenFlow Protocol "))
             self.controllerThread = ControllerRunner("openflow")
             self.controllerThread.start()
             self.controllerThread.router_scheduler = self.router_scheduler

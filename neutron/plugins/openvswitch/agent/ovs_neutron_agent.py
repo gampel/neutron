@@ -1439,7 +1439,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 port_info.get('removed') or
                 port_info.get('updated'))
 
-    def check_ovs_restart(self):
+    def check_ovs_status(self):
         # Check for the canary flow
         # Sync lock for race condition with set_controller
         self.set_controller_lock.acquire()
