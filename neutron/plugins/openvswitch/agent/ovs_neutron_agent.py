@@ -549,6 +549,10 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 bridge.add_flow(priority=0, actions="normal")
                 bridge.add_flow(table=constants.CANARY_TABLE, priority=0,
                                 actions="drop")
+                bridge.add_flow(table="60", priority=1,
+                                actions="move:NXM_NX_TUN_ID[0..31]->NXM_NX_PKT_MARK[],"
+                                "output:%s" %
+                                (self.patch_tun_ofport))
             bridge.set_controller_mode("out-of-band")
             self.set_controller_lock.release()
 
@@ -943,6 +947,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                  constants.FLOOD_TO_TUN)
         # FLOOD_TO_TUN will handle flooding in tunnels based on lvid,
         # for now, add a default drop action
+
         self.tun_br.add_flow(table=constants.FLOOD_TO_TUN,
                              priority=0,
                              actions="drop")
@@ -1164,6 +1169,13 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                 dl_vlan=vlan_mapping.vlan,
                                 actions="strip_vlan,set_tunnel:%s,output:%s" %
                                 (vlan_mapping.segmentation_id, ofports))
+        if self.enable_l3_controller:
+            if ofports:
+                    br.add_flow(table=constants.FLOOD_TO_TUN,
+                            actions="move:NXM_NX_PKT_MARK[]->NXM_NX_TUN_ID[0..31],"
+                                    "output:%s" %
+                                    (ofports))
+
         return ofport
 
     def setup_tunnel_port(self, br, remote_ip, network_type):

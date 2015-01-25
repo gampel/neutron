@@ -48,7 +48,6 @@ from neutron.plugins.ml2 import driver_api as api
 from neutron import context
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
-
 LOG = log.getLogger(__name__)
 
 ETHERNET = ethernet.ethernet.__name__
@@ -351,7 +350,6 @@ class L3ReactiveApp(app_manager.RyuApp):
                               eth):
         pkt_ipv4 = header_list['ipv4']
         pkt_ethernet = header_list['ethernet']
-        #ipdb.set_trace()
         switch = self.dp_list.get(datapath.id)
         if switch:
             if 'metadata' not in msg.match:
@@ -505,7 +503,7 @@ class L3ReactiveApp(app_manager.RyuApp):
                                                        'mac_address'],
                                                    dst_p_data[
                                                        'mac_address'],
-                                                   localSwitch.patch_port,
+                                                   localSwitch.patch_port_num,
                                                    dst_seg_id=dst_seg_id)
             # Remote reverse flow install
             self.add_flow_subnet_traffic(remoteSwitch.datapath,
@@ -520,6 +518,7 @@ class L3ReactiveApp(app_manager.RyuApp):
                                          eth.dst,
                                          in_port_data['mac_address'],
                                          in_port_data['local_port_num'],
+                                         remoteSwitch.patch_port_num,
                                          dst_seg_id=src_seg_id)
             self.handle_packet_out_l3(datapath, msg, in_port, actions)
 
@@ -543,29 +542,44 @@ class L3ReactiveApp(app_manager.RyuApp):
         match = parser.OFPMatch()
         match.set_dl_type( ether.ETH_TYPE_IP)
         match.set_in_port(in_port)
-        match.set_metadata(src_seg_id)
+        match.set_metadata(src_seg_id )
         match.set_dl_src(haddr_to_bin(match_src_mac))
         match.set_dl_dst(haddr_to_bin(match_dst_mac))
         match.set_ipv4_src(ipv4_text_to_int(str(match_src_ip)))
         match.set_ipv4_dst(ipv4_text_to_int(str(match_dst_ip)))
         actions = []
+        inst = []
+        write_metadata = 0;
+        ofproto = datapath.ofproto
         if dst_seg_id:
-            field = parser.OFPActionSetField(tunnel_id=dst_seg_id)
-            actions.append(parser.OFPActionSetField(field))
+            #The best vm is on another compute machine so we must set the
+            #segmentation Id and set metadata for the tunnel bridge to flood this packet
+            field = parser.OFPActionSetField(tunnel_id=dst_seg_id )
+            actions.append(field)
+            goto_inst = parser.OFPInstructionGotoTable(60)
+            #field = parser.OFPActionSetField(metadata=0x8000)
+            #actions.append(field)
+            #write_metadata = parser.OFPInstructionWriteMetadata(0x8000,0x8000)
+            #inst= [write_metadata]
+            inst.append(goto_inst)
+            #inst.append(write_metadata)
+        else:
+            actions.append(parser.OFPActionOutput(out_port_num,
+                                              ofproto.OFPCML_NO_BUFFER))
         actions.append(parser.OFPActionDecNwTtl())
         actions.append(parser.OFPActionSetField(eth_src=src_mac))
         actions.append(parser.OFPActionSetField(eth_dst=dst_mac))
-        actions.append(parser.OFPActionOutput(out_port_num,
-                                              ofproto.OFPCML_NO_BUFFER))
-        ofproto = datapath.ofproto
-        inst = [datapath.ofproto_parser.OFPInstructionActions(
-            ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        #inst.append( datapath.ofproto_parser.OFPInstructionActions(
+        #    ofproto.OFPIT_APPLY_ACTIONS, actions))
+        inst.append(datapath.ofproto_parser.OFPInstructionActions(
+                        ofproto.OFPIT_APPLY_ACTIONS, actions))
         self.mod_flow(
             datapath,
             inst=inst,
             table_id=table,
             priority=priority,
-            match=match)
+            match=match,
+            out_port=out_port_num)
 
         return actions
 

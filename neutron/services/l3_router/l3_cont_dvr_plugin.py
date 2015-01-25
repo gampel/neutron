@@ -49,7 +49,7 @@ LOG = logging.getLogger(__name__)
 
 NET_CONTROL_L3_OPTS = [
     cfg.StrOpt('L3controller_ip_list',
-               default='tcp:10.100.100.3:6633',
+               default='tcp:172.16.10.10:6633',
                help=("L3 Controler IP list list tcp:ip_addr:port;"
                      "tcp:ip_addr:port..;..")),
     cfg.StrOpt('net_controller_l3_southbound_protocol',
