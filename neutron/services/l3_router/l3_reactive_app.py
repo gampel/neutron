@@ -551,6 +551,9 @@ class L3ReactiveApp(app_manager.RyuApp):
         inst = []
         write_metadata = 0;
         ofproto = datapath.ofproto
+        actions.append(parser.OFPActionDecNwTtl())
+        actions.append(parser.OFPActionSetField(eth_src=src_mac))
+        actions.append(parser.OFPActionSetField(eth_dst=dst_mac))
         if dst_seg_id:
             #The best vm is on another compute machine so we must set the
             #segmentation Id and set metadata for the tunnel bridge to flood this packet
@@ -566,10 +569,7 @@ class L3ReactiveApp(app_manager.RyuApp):
         else:
             actions.append(parser.OFPActionOutput(out_port_num,
                                               ofproto.OFPCML_NO_BUFFER))
-        actions.append(parser.OFPActionDecNwTtl())
-        actions.append(parser.OFPActionSetField(eth_src=src_mac))
-        actions.append(parser.OFPActionSetField(eth_dst=dst_mac))
-        #inst.append( datapath.ofproto_parser.OFPInstructionActions(
+       #inst.append( datapath.ofproto_parser.OFPInstructionActions(
         #    ofproto.OFPIT_APPLY_ACTIONS, actions))
         inst.append(datapath.ofproto_parser.OFPInstructionActions(
                         ofproto.OFPIT_APPLY_ACTIONS, actions))
