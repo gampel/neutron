@@ -43,7 +43,6 @@ from neutron.openstack.common import log as logging
 from neutron.openstack.common import loopingcall
 
 from neutron.services.l3_router.l3_reactive_app import L3ReactiveApp
-
 LOG = logging.getLogger(__name__)
 
 
@@ -286,11 +285,13 @@ class ControllerRunner(threading.Thread):
         self.heartbeat.start(interval=30)
 
     def _report_state_and_bind_routers(self):
-        if self.sync_all:
-            l3plugin = manager.NeutronManager.get_service_plugins().get(
+        l3plugin = manager.NeutronManager.get_service_plugins().get(
                 constants.L3_ROUTER_NAT)
+        if self.sync_all:
             l3plugin.send_set_controllers_update(self.ctx, True)
             self.sync_all = False
+        else:
+            l3plugin.send_set_controllers_update(self.ctx, False)
         plugin = manager.NeutronManager.get_plugin()
         plugin.create_or_update_agent(self.ctx, self.agent_state)
         self.bind_unscheduled_routers()

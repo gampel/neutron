@@ -814,8 +814,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # which does nothing if bridge already exists.
         self.int_br.create()
         self.int_br.set_secure_mode()
-        if not self.enable_l3_controller:
-            self.int_br.del_controller()
+        #if not self.enable_l3_controller:
+        self.int_br.del_controller()
         self.int_br.delete_port(cfg.CONF.OVS.int_peer_patch_port)
         self.int_br.remove_all_flows()
         # switch all traffic using L2 learning
