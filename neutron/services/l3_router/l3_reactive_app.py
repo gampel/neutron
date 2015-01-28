@@ -517,7 +517,6 @@ class L3ReactiveApp(app_manager.RyuApp):
                                          pkt_ipv4.dst,
                                          eth.dst,
                                          in_port_data['mac_address'],
-                                         in_port_data['local_port_num'],
                                          remoteSwitch.patch_port_num,
                                          dst_seg_id=src_seg_id)
             self.handle_packet_out_l3(datapath, msg, in_port, actions)
